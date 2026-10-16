@@ -29,9 +29,26 @@ Pester by area:
 
 Negative check: breaking `pr-policy.yml` on purpose (`persist-credentials: true`, the timeout removed, the PR title put inside `run:`) made exactly the three matching `Template.Tests.ps1` tests fail. With the file restored, 0 failed.
 
-## 2. CI on GitHub
+## 2. Live audit of this repository (2026-10-16, before any settings were applied)
 
-To be filled in from the first pull request's runs: run links, each job's result and time.
+`Test-RepoGovernance.ps1 -Path . -Repository kaushik-sai/governed-repo-template`, read-only, with a token that has push but not admin rights. Exit code 1, as expected: the repo was created with GitHub's defaults and `Set-RepoGovernance.ps1` had not been run yet.
+
+| Result | Checks |
+|---|---|
+| Pass | the 25 offline checks; `allow_squash_merge`, `allow_auto_merge` |
+| Fail, real drift | `allow_merge_commit` and `allow_rebase_merge` are on; `delete_branch_on_merge` is off; squash commit title and message are GitHub's defaults; wiki and projects are on; no ruleset named `protect-default-branch` |
+| Fail, not visible to this token | secret scanning and push protection (GitHub only returns them to admins); Dependabot alerts (HTTP 403) |
+
+This is the drift report the script is for. Running `Set-RepoGovernance.ps1` as the owner should turn every row to Pass.
+
+## 3. CI on GitHub
+
+First run on PR #1 (commit `c389e7e`): `lint`, `workflow-lint`, `secret-scan` and `pr-policy` passed. Two failed:
+
+| Job | Cause | Fix |
+|---|---|---|
+| `test` | All 339 Pester tests passed, then the summary step failed: two tests reset `GITHUB_STEP_SUMMARY` to empty instead of restoring it | The tests now restore the original value. Reproduced locally with the variable set, then fixed |
+| `dependency-review` | "Dependency review is not supported on this repository. Please ensure that Dependency graph is enabled" | Needs a repo admin: running `Set-RepoGovernance.ps1` turns on Dependabot alerts, which turns on the dependency graph, or enable it under Settings, Code security |
 
 ## Not verified yet
 
@@ -41,5 +58,5 @@ To be filled in from the first pull request's runs: run links, each job's result
 | `Set-RepoGovernance.ps1` and `Test-RepoGovernance.ps1 -Repository` against a real repo | No GitHub admin API access from the build session; every call is mocked in tests. The exact `gh` output for plan-gated 403/422 errors is assumed from GitHub's docs | Run both against this repo with `gh auth login` as the owner, `-WhatIf` first |
 | `New-GovernedRepo.ps1` end to end | Same as above | Create a throwaway repo, audit it, delete it |
 | The guard hook and permission rules inside a live Claude Code session | Tested as a script with JSON on stdin, not through Claude Code itself | Open the repo in Claude Code and try a denied command, such as `git push --force origin main` |
-| The ruleset actually enforced | The repo is private on GitHub Free, where rulesets are not enforced | Make the repo public (or use a paid plan), run `Set-RepoGovernance.ps1`, then try a direct push to `main` |
+| The ruleset actually enforced | `Set-RepoGovernance.ps1` has not been run on this repo yet (it needs an admin token) | Run it as the owner, then try a direct push to `main`: it should be refused |
 | Dependabot PR titles passing `pr-policy` | Needs a real Dependabot run | The first weekly Dependabot PR |

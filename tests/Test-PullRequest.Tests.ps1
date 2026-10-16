@@ -140,6 +140,9 @@ Describe 'ConvertTo-SummaryMarkdown' {
 }
 
 Describe 'Test-PullRequest.ps1 as a command' {
+    # These tests point GITHUB_STEP_SUMMARY at a temp file. In CI it is the real run summary,
+    # so the original value is put back after each test; clearing it broke the summary step.
+    BeforeAll { $script:originalSummary = $env:GITHUB_STEP_SUMMARY }
     BeforeEach {
         $script:summary = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath "summary-$([guid]::NewGuid().ToString('N')).md"
     }
@@ -149,7 +152,7 @@ Describe 'Test-PullRequest.ps1 as a command' {
         $env:GITHUB_STEP_SUMMARY = $script:summary
         try {
             $out = & pwsh -NoProfile -File $script:scriptPath -Title 'feat: x' -Body $script:goodBody -ChangedFiles 3 2>&1 | Out-String
-        } finally { $env:GITHUB_STEP_SUMMARY = $null }
+        } finally { $env:GITHUB_STEP_SUMMARY = $script:originalSummary }
         $LASTEXITCODE | Should -Be 0
         $out | Should -Not -Match '::error'
         Get-Content -Path $script:summary -Raw | Should -Match '\| Title \| Pass \|'
@@ -158,7 +161,7 @@ Describe 'Test-PullRequest.ps1 as a command' {
         $env:GITHUB_STEP_SUMMARY = $script:summary
         try {
             $out = & pwsh -NoProfile -File $script:scriptPath -Title 'nope' -Body $script:goodBody 2>&1 | Out-String
-        } finally { $env:GITHUB_STEP_SUMMARY = $null }
+        } finally { $env:GITHUB_STEP_SUMMARY = $script:originalSummary }
         $LASTEXITCODE | Should -Be 1
         $out | Should -Match '::error title=Pull request policy::Title'
     }
