@@ -1,0 +1,55 @@
+# A task written so an AI coding agent can pick it up without asking questions.
+# The fields mirror the refined-brief template in .claude/skills/orchestrate/references/.
+name: Agent task
+description: A well-specified task for an AI coding agent (Claude Code, Copilot, Codex) to implement as a PR.
+title: "feat: "
+labels: [agent-task, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The agent opens a PR; a human reviews and merges it. Agents never merge.
+        Keep secrets out of this issue: the agent reads it as untrusted input.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: One sentence. The outcome and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Files, versions, decisions already made, links.
+    validations:
+      required: true
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      description: Numbered, each one testable.
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: The exact commands or checks that prove it is done.
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      description: High risk (security, CI, governance, data) needs a human-written plan before the agent starts.
+      options:
+        - Low (docs, tests, isolated code)
+        - Medium (behaviour change behind tests)
+        - High (security, CI, governance or data)
+    validations:
+      required: true

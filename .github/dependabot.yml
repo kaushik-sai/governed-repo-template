@@ -1,0 +1,21 @@
+# dependabot: keeps the pinned GitHub Actions (full commit SHAs) current.
+# Pinning by SHA means nothing updates by itself; Dependabot proposes the new SHA and version comment.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week after a release before proposing it, so a hijacked or yanked release is
+    # usually noticed before it reaches a pull request.
+    cooldown:
+      default-days: 7
+    # One pull request for all action updates, not one per action.
+    groups:
+      github-actions:
+        patterns: ['*']
+    # "ci: ..." passes the Conventional Commits title check in pr-policy.
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies

@@ -1,0 +1,108 @@
+# security: secret scanning and dependency review.
+#   secret-scan:       gitleaks over the full git history, on PRs, on main and weekly.
+#   dependency-review: blocks a PR that adds a dependency with a known vulnerability.
+# The job ids are required status check names in governance/policy.json; keep them in step.
+
+name: security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  # Weekly, so a rule added to gitleaks later still finds an old leak.
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+# Read-only token: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A new push to a PR cancels the run it replaces; runs on main and scheduled runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GITLEAKS_VERSION: '8.30.1'
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # fetch-depth: 0 fetches every commit: a secret that was added and then deleted is still a leak.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 'Tools: pinned gitleaks'
+        run: |
+          # Save-VerifiedFile downloads a release file and its checksum file and throws on a mismatch.
+          . ./scripts/lib/Download.ps1
+          $bin = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'bin'
+          New-Item -ItemType Directory -Path $bin -Force | Out-Null
+
+          $version = $env:GITLEAKS_VERSION
+          $name = "gitleaks_${version}_linux_x64.tar.gz"
+          $base = "https://github.com/gitleaks/gitleaks/releases/download/v$version"
+          $archive = Join-Path -Path $env:RUNNER_TEMP -ChildPath $name
+          Save-VerifiedFile -Uri "$base/$name" -ChecksumUri "$base/gitleaks_${version}_checksums.txt" -Path $archive
+          tar -xzf $archive -C $bin gitleaks
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & (Join-Path -Path $bin -ChildPath 'gitleaks') version
+
+      # --redact keeps the secret itself out of the log and the report; only rule, file and line show.
+      - name: 'Scan: gitleaks, full history'
+        run: |
+          $report = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'gitleaks.json'
+          gitleaks git . --config .gitleaks.toml --redact --no-banner --report-format json --report-path $report
+          $code = $LASTEXITCODE
+
+          $summary = @('### gitleaks', '')
+          if ($code -eq 0) {
+              $summary += 'No leaks found in the full history.'
+          }
+          else {
+              $leaks = @(Get-Content -Path $report -Raw | ConvertFrom-Json)
+              $summary += "$($leaks.Count) potential leak(s). Rotate the credential, then remove it from history."
+              $summary += ''
+              $summary += '| Rule | File | Line | Commit |'
+              $summary += '|---|---|---|---|'
+              foreach ($leak in $leaks) {
+                  $summary += "| $($leak.RuleID) | $($leak.File) | $($leak.StartLine) | $($leak.Commit.Substring(0, 8)) |"
+              }
+          }
+          $summary | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+          if ($code -ne 0) { Write-Output "::error::gitleaks exited with code $code."; exit 1 }
+
+  dependency-review:
+    name: dependency-review
+    # Pull requests only: it compares the dependency graph of the base and the head.
+    # The dependency graph is free on public repositories but needs GitHub Advanced Security on
+    # private ones, so on a private repository the job is skipped. A skipped required check
+    # counts as passed, so private repositories without Advanced Security are not blocked.
+    if: github.event_name == 'pull_request' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # comment-summary-in-pr stays off: commenting needs pull-requests: write, and the token
+      # stays read-only. The result is in the job summary instead.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: never

@@ -1,0 +1,14 @@
+# Code owners: a PR that touches these paths needs a review from the owner (the ruleset
+# sets require_code_owner_review). Repos made from this template: replace @kaushik-sai
+# with your user or team (for example @your-org/platform-team).
+
+# Default owner for everything.
+*                       @kaushik-sai
+
+# Governance, CI and agent guardrails: changes here change what every PR is checked against.
+/.github/               @kaushik-sai
+/governance/            @kaushik-sai
+/.claude/               @kaushik-sai
+/CLAUDE.md              @kaushik-sai
+/AGENTS.md              @kaushik-sai
+/SECURITY.md            @kaushik-sai

@@ -1,0 +1,187 @@
+# ci: the checks for every pull request and for main, on GitHub-hosted runners.
+#   lint:          PSScriptAnalyzer over every PowerShell file.
+#   test:          Pester, including the policy-as-code checks in tests/Template.Tests.ps1.
+#   workflow-lint: actionlint (syntax) and zizmor (security) over .github/workflows.
+# The job ids are the required status check names in governance/policy.json; keep them in step.
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  # Runs on main too, so the README badge shows the state of main.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Read-only token: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A new push to a PR cancels the run it replaces; runs on main always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Pinned tool versions. actionlint comes from its official release and must match the SHA-256
+# that release publishes; zizmor is installed with pip hash checking (see requirements/zizmor.txt).
+env:
+  PESTER_VERSION: '5.9.1'
+  SCRIPT_ANALYZER_VERSION: '1.25.0'
+  ACTIONLINT_VERSION: '1.7.12'
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # persist-credentials: false keeps the token out of .git/config for later steps.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 'Tools: pinned PSScriptAnalyzer'
+        run: |
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object { $_.Version -eq [version] $env:SCRIPT_ANALYZER_VERSION })) {
+              Write-Output "Installing PSScriptAnalyzer $($env:SCRIPT_ANALYZER_VERSION)"
+              Install-Module -Name PSScriptAnalyzer -RequiredVersion $env:SCRIPT_ANALYZER_VERSION -Scope CurrentUser -Force -SkipPublisherCheck -Repository PSGallery
+          }
+
+      - name: 'Lint: PSScriptAnalyzer'
+        run: |
+          Import-Module PSScriptAnalyzer -RequiredVersion $env:SCRIPT_ANALYZER_VERSION
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          $results | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize -Wrap | Out-String -Width 200
+          # Information findings are shown but do not fail the build.
+          $blocking = @($results | Where-Object Severity -In 'Error', 'Warning', 'ParseError')
+          $summary = @(
+              '### PSScriptAnalyzer'
+              ''
+              "- Errors and warnings: $($blocking.Count)"
+              "- Information: $(@($results | Where-Object Severity -EQ 'Information').Count)"
+          )
+          foreach ($finding in $blocking) {
+              $summary += "- $($finding.Severity) $($finding.RuleName): $($finding.ScriptName):$($finding.Line)"
+          }
+          $summary | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          if ($blocking.Count -gt 0) {
+              Write-Output "::error::PSScriptAnalyzer: $($blocking.Count) error/warning finding(s)."
+              exit 1
+          }
+          Write-Output 'PSScriptAnalyzer: no errors or warnings.'
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 'Tools: pinned Pester'
+        run: |
+          if (-not (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version -eq [version] $env:PESTER_VERSION })) {
+              Write-Output "Installing Pester $($env:PESTER_VERSION)"
+              Install-Module -Name Pester -RequiredVersion $env:PESTER_VERSION -Scope CurrentUser -Force -SkipPublisherCheck -Repository PSGallery
+          }
+
+      - name: 'Test: Pester'
+        run: |
+          Import-Module Pester -RequiredVersion $env:PESTER_VERSION
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputFormat = 'NUnitXml'
+          $config.TestResult.OutputPath = (Join-Path -Path $env:RUNNER_TEMP -ChildPath 'pester.xml')
+          $result = Invoke-Pester -Configuration $config
+
+          # GitHub has no Tests tab, so the totals and any failures go on the run's summary page.
+          $summary = @(
+              '### Pester'
+              ''
+              '| Result | Passed | Failed | Skipped | Total | Duration |'
+              '|---|---|---|---|---|---|'
+              "| $($result.Result) | $($result.PassedCount) | $($result.FailedCount) | $($result.SkippedCount) | $($result.TotalCount) | $([math]::Round($result.Duration.TotalSeconds))s |"
+          )
+          foreach ($test in $result.Failed) {
+              $summary += "- Failed: $($test.ExpandedPath)"
+          }
+          if ($result.FailedContainersCount -gt 0) {
+              $summary += "- $($result.FailedContainersCount) test file(s) failed to run"
+          }
+          $summary | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+          if ($result.Result -ne 'Passed') {
+              Write-Output "::error::Pester: $($result.FailedCount) failed test(s), $($result.FailedContainersCount) test file(s) failed to run."
+              exit 1
+          }
+
+      # Keep the results even when tests failed, so the NUnit file can be downloaded from the run.
+      - name: 'Publish Pester results'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pester-results
+          path: ${{ runner.temp }}/pester.xml
+          if-no-files-found: ignore
+
+  workflow-lint:
+    name: workflow-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 'Tools: pinned actionlint'
+        run: |
+          # Save-VerifiedFile downloads a release file and its checksum file and throws on a mismatch.
+          . ./scripts/lib/Download.ps1
+          $bin = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'bin'
+          New-Item -ItemType Directory -Path $bin -Force | Out-Null
+
+          $version = $env:ACTIONLINT_VERSION
+          $name = "actionlint_${version}_linux_amd64.tar.gz"
+          $base = "https://github.com/rhysd/actionlint/releases/download/v$version"
+          $archive = Join-Path -Path $env:RUNNER_TEMP -ChildPath $name
+          Save-VerifiedFile -Uri "$base/$name" -ChecksumUri "$base/actionlint_${version}_checksums.txt" -Path $archive
+          tar -xzf $archive -C $bin actionlint
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & (Join-Path -Path $bin -ChildPath 'actionlint') -version
+
+      # Hash-pinned install into a throwaway virtualenv: pip refuses any file whose hash differs.
+      - name: 'Tools: pinned zizmor'
+        run: |
+          $venv = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'zizmor-venv'
+          python3 -m venv $venv
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & (Join-Path -Path $venv -ChildPath 'bin/pip') install --require-hashes --no-deps --quiet -r .github/requirements/zizmor.txt
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path -Path $venv -ChildPath 'bin')
+
+      - name: 'Lint: actionlint'
+        run: |
+          actionlint -color
+          if ($LASTEXITCODE -ne 0) { Write-Output '::error::actionlint found problems in the workflows.'; exit 1 }
+          Write-Output 'actionlint: no findings.'
+
+      # --offline: no token and no network, so only the static audits run; that is enough to catch
+      # template injection, unpinned actions, excessive permissions and credential persistence.
+      # Any finding at any severity fails the job.
+      - name: 'Lint: zizmor'
+        run: |
+          zizmor --offline --min-severity informational .github/workflows
+          $code = $LASTEXITCODE
+          '### zizmor', '', ($code -eq 0 ? 'No findings.' : 'Findings: see the job log.') | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          if ($code -ne 0) { Write-Output "::error::zizmor reported findings (exit code $code)."; exit 1 }

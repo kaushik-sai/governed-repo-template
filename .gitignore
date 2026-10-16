@@ -1,0 +1,26 @@
+# Secrets and local config: never commit
+.env
+.env.*
+!.env.example
+*.pat
+*.pem
+*.key
+*.pfx
+secrets/
+.secrets/
+
+# Claude Code: personal settings and local state stay on the machine
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Pester / analyzer output
+TestResults.xml
+testResults.xml
+coverage.xml
+out/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

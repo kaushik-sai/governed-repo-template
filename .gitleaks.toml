@@ -1,0 +1,12 @@
+# gitleaks configuration for the secret-scan job and for local runs.
+# Extends the built-in rule set; only the paths below are allowed, nothing else.
+title = "governed-repo-template"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures hold fake credentials on purpose"
+paths = [
+  '''tests/fixtures/.*''',
+]
