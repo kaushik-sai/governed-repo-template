@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "description": "What a governed repository must have. Read by scripts/Test-RepoGovernance.ps1, scripts/Set-RepoGovernance.ps1, scripts/Test-PullRequest.ps1 and tests/Template.Tests.ps1.",
+  "defaultBranch": "main",
+  "rulesetPath": "governance/rulesets/main.json",
+  "requiredFiles": [
+    "README.md",
+    "DESIGN.md",
+    "RUNBOOK.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".claude/settings.json",
+    ".github/CODEOWNERS",
+    ".github/pull_request_template.md",
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/security.yml",
+    ".github/workflows/pr-policy.yml",
+    "docs/DECISIONS.md",
+    "docs/EVIDENCE.md",
+    "PSScriptAnalyzerSettings.psd1"
+  ],
+  "requiredStatusChecks": [
+    "lint",
+    "test",
+    "workflow-lint",
+    "secret-scan",
+    "dependency-review",
+    "pr-policy"
+  ],
+  "repoSettings": {
+    "allow_squash_merge": true,
+    "allow_merge_commit": false,
+    "allow_rebase_merge": false,
+    "allow_auto_merge": false,
+    "delete_branch_on_merge": true,
+    "squash_merge_commit_title": "PR_TITLE",
+    "squash_merge_commit_message": "PR_BODY",
+    "has_wiki": false,
+    "has_projects": false
+  },
+  "securityFeatures": {
+    "vulnerabilityAlerts": true,
+    "automatedSecurityFixes": true,
+    "secretScanning": true,
+    "secretScanningPushProtection": true,
+    "privateVulnerabilityReporting": true
+  },
+  "pullRequest": {
+    "titlePattern": "^(feat|fix|docs|refactor|test|ci|build|chore|perf|revert|security)(\\([a-z0-9._/-]+\\))?!?: [^\\s].{0,98}$",
+    "requiredSections": [
+      "## What changed",
+      "## Why",
+      "## How it was verified",
+      "## Risk and rollback"
+    ],
+    "agentDisclosureSection": "## AI assistance",
+    "maxChangedFiles": 60
+  }
+}
